@@ -17,6 +17,12 @@ def filtrer_donnees_sensibles(texte):
     texte = re.sub(r'\b0[1-9](\s?\d{2}){4}\b', '[TÉLÉPHONE MASQUÉ]', texte)
     texte = re.sub(r'\b(?:\d[ -]?){13,16}\b', '[CARTE MASQUÉE]', texte)
     return texte
+def enregistrer_question(question):
+    from datetime import datetime
+    horodatage = datetime.now().strftime("%Y-%m-%d %H:%M")
+    question_propre = filtrer_donnees_sensibles(question)
+    with open("questions_log.txt", "a", encoding="utf-8") as f:
+        f.write(f"{horodatage} | {question_propre}\n")
 
 @app.route("/")
 def index():
@@ -26,6 +32,8 @@ def index():
 @limiter.limit("10 per minute")
 def chat():
     message = request.json.get("message")
+    if message:
+        enregistrer_question(message)
     if message and len(message) > 500:
         return jsonify({"reponse": "Message trop long, merci de reformuler plus brièvement."}), 400
     historique.append({
