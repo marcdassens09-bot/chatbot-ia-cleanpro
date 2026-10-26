@@ -79,6 +79,10 @@
 
     <script>
         let nomUtilisateur = "";
+        // Identifiant propre a CE visiteur : sa conversation reste a lui.
+        const sessionId = (window.crypto && crypto.randomUUID)
+            ? crypto.randomUUID().replace(/-/g, "")
+            : Date.now().toString(36) + Math.random().toString(36).slice(2, 12);
 
         function questionRapide(texte) {
             document.getElementById("message").value = texte;
@@ -110,7 +114,7 @@
             const reponse = await fetch("/chat", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ message: texte, nom: nomUtilisateur })
+                body: JSON.stringify({ message: texte, nom: nomUtilisateur, session_id: sessionId })
             });
             document.getElementById("typing").classList.remove("active");
             const data = await reponse.json();
@@ -118,7 +122,11 @@
         }
 
         async function effacerChat() {
-            await fetch("/effacer", { method: "POST" });
+            await fetch("/effacer", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ session_id: sessionId })
+            });
             document.getElementById("chat-box").innerHTML = "";
             ajouterMessage(`Bonjour ${nomUtilisateur} ! Comment puis-je vous aider ? 😊`, "ia");
         }

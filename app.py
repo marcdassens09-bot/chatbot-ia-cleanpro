@@ -1,4 +1,6 @@
 import re
+import secrets
+from collections import OrderedDict
 from flask import Flask, request, jsonify, render_template
 from anthropic import Anthropic
 from dotenv import load_dotenv
@@ -10,7 +12,26 @@ load_dotenv()
 app = Flask(__name__)
 limiter = Limiter(get_remote_address, app=app, default_limits=["20 per minute"])
 client = Anthropic()
-historique = []
+
+# Une conversation PAR VISITEUR (cle = session_id envoye par le navigateur).
+# Avant : une seule liste globale partagee par tous les visiteurs.
+conversations = OrderedDict()
+MAX_SESSIONS = 500   # au-dela, on oublie la conversation la plus ancienne
+MAX_MESSAGES = 20    # on ne garde que les 20 derniers messages par visiteur
+
+
+def session_valide(session_id):
+    return isinstance(session_id, str) and 8 <= len(session_id) <= 64 \
+        and re.fullmatch(r"[A-Za-z0-9_-]+", session_id) is not None
+
+
+def historique_de(session_id):
+    if session_id not in conversations:
+        conversations[session_id] = []
+        if len(conversations) > MAX_SESSIONS:
+            conversations.popitem(last=False)
+    conversations.move_to_end(session_id)
+    return conversations[session_id]
 
 def filtrer_donnees_sensibles(texte):
     texte = re.sub(r'[\w\.-]+@[\w\.-]+\.\w+', '[EMAIL MASQUÉ]', texte)
@@ -51,11 +72,19 @@ def index():
 @app.route("/chat", methods=["POST"])
 @limiter.limit("10 per minute")
 def chat():
-    message = request.json.get("message")
-    if message:
-        enregistrer_question(message)
-    if message and len(message) > 500:
+    data = request.get_json(silent=True) or {}
+    message = data.get("message")
+    if not isinstance(message, str) or not message.strip():
+        return jsonify({"reponse": "Merci d'écrire un message."}), 400
+    if len(message) > 500:
         return jsonify({"reponse": "Message trop long, merci de reformuler plus brièvement."}), 400
+    enregistrer_question(message)
+
+    session_id = data.get("session_id")
+    if not session_valide(session_id):
+        session_id = secrets.token_hex(8)
+    historique = historique_de(session_id)
+
     historique.append({
         "role": "user",
         "content": filtrer_donnees_sensibles(message)
@@ -73,14 +102,16 @@ def chat():
             "role": "assistant",
             "content": texte
         })
-        return jsonify({"reponse": texte})
+        del historique[:-MAX_MESSAGES]
+        return jsonify({"reponse": texte, "session_id": session_id})
     except Exception as e:
+        historique.pop()  # retire la question restee sans reponse
         print(f"Erreur API chat : {e}")
         return jsonify({"reponse": "Desole, je rencontre un probleme technique. Merci de reessayer dans quelques instants."}), 500
 @app.route("/effacer", methods=["POST"])
 def effacer():
-    global historique
-    historique = []
+    data = request.get_json(silent=True) or {}
+    conversations.pop(data.get("session_id"), None)
     return jsonify({"status": "ok"})
 
 import os
